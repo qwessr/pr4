@@ -19,6 +19,23 @@ namespace Server
         /// <summary> Порт сервера </summary>
         public static int Port;
 
+        static void Main(string[] args)
+        {
+            Users.Add(new User("test", "test123", @"A:\test"));
+            Console.Write("Введите IP адрес сервера: ");
+            string sIPAdress = Console.ReadLine();
+            Console.Write("Введите порт: ");
+            string sPort = Console.ReadLine();
+            if (int.TryParse(sPort, out Port) && IPAddress.TryParse(sIPAdress, out IPAdress))
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Данные успешно введены. Запускаю сервер.");
+                StartServer();
+            }
+
+            Console.Read();
+        }
+
 
         /// <summary> Авторизация пользователя </summary>
         public static bool AutorizationUser(string login, string password)
