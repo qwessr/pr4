@@ -6,7 +6,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
-using Newtonoft.Json;
+using Common;
+using Intercom.Data;
+using Newtonsoft.Json;
 
 namespace Server
 {
@@ -26,7 +28,7 @@ namespace Server
             string sIPAdress = Console.ReadLine();
             Console.Write("Введите порт: ");
             string sPort = Console.ReadLine();
-            if (int.TryParse(sPort, out Port) && IPAddress.TryParse(sIPAdress, out IPAdress))
+            if (int.TryParse(sPort, out Port) && IPAddress.TryParse(sIPAdress, out IpAddress))
             {
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("Данные успешно введены. Запускаю сервер.");
@@ -52,7 +54,7 @@ namespace Server
         {
             IPEndPoint endPoint = new IPEndPoint(IpAddress, Port);
             Socket sListener = new Socket(
-                AddressFamily.InternetNetwork,
+                AddressFamily.InterNetwork,
                 SocketType.Stream,
                 ProtocolType.Tcp);
             sListener.Bind(endPoint);
@@ -69,14 +71,14 @@ namespace Server
                     Data += Encoding.UTF8.GetString(Bytes, 0, BytesRec);
                     Log($"Сообщение от пользователя: (Data) \n", ConsoleColor.White);
                     string Peply = "";
-                    ViewModelSend viewModelSend = JsonConvert.DeserializeObject<viewModelSend>(Data);
+                    ViewModelSend viewModelSend = JsonConvert.DeserializeObject<ViewModelSend>(Data);
                     if (viewModelSend != null)
                     {
                         ViewModelMessage viewModelMessage;
                         string[] DataCommand = viewModelSend.Message.Split(new string[1] { " " }, StringSplitOption.None);
                         if (DataCommand[0] == "connect")
                         {
-                            string[] DataMessage = ViewModelSend.Message.Split(new string[1] { " " }, StringSplitOptions.None);
+                            string[] DataMessage = viewModelSend.Message.Split(new string[1] { " " }, StringSplitOptions.None);
                             if (AutorizationUser(DataMessage[1], DataMessage[2]))
                             {
                                 int IdUser = Users.FindIndex(x => x.login == DataMessage[1] && x.password == DataMessage[2]);
@@ -93,14 +95,14 @@ namespace Server
                         }
                         else if (DataCommand[0] == "cd")
                         {
-                            if (ViewModelSend.Id != -1)
+                            if (viewModelSend.Id != -1)
                             {
-                                string[] DataMessage = ViewModelSend.Message.Split(new string[1] { " " }, StringSplitOptions.None);
+                                string[] DataMessage = viewModelSend.Message.Split(new string[1] { " " }, StringSplitOptions.None);
                                 List<string> FoldersFiles = new List<string>();
                                 if (DataMessage.Length == 1)
                                 {
-                                    Users[ViewModelSend.Id].temp_src = Users[ViewModelSend.Id].src;
-                                    FoldersFiles = GetDirectory(Users[ViewModelSend.Id].src);
+                                    Users[viewModelSend.Id].temp_src = Users[viewModelSend.Id].src;
+                                    FoldersFiles = GetDirectory(Users[viewModelSend.Id].src);
                                 }
                                 else
                                 {
@@ -110,8 +112,8 @@ namespace Server
                                             cdfolder += DataMessage[i];
                                         else
                                             cdfolder += " " + DataMessage[i];
-                                    Users[ViewModelSend.Id].temp_src = Users[ViewModelSend.Id].temp_src + cdfolder;
-                                    FoldersFiles = GetDirectory(Users[ViewModelSend.Id].temp_src);
+                                    Users[viewModelSend.Id].temp_src = Users[viewModelSend.Id].temp_src + cdfolder;
+                                    FoldersFiles = GetDirectory(Users[viewModelSend.Id].temp_src);
                                 }
                                 if (FoldersFiles.Count == 0)
                                     viewModelMessage = new ViewModelMessage("message", "Директория пуста или не существует.");
@@ -126,9 +128,9 @@ namespace Server
                         }
                         else if (DataCommand[0] == "get")
                         {
-                            if (ViewModelSend.Id != -1)
+                            if (viewModelSend.Id != -1)
                             {
-                                string[] DataMessage = ViewModelSend.Message.Split(new string[1] { " " }, StringSplitOptions.None);
+                                string[] DataMessage = viewModelSend.Message.Split(new string[1] { " " }, StringSplitOptions.None);
                                 string getFile = "";
                                 for (int i = 1; i < DataMessage.Length; i++)
                                     if (getFile == "")
@@ -136,7 +138,7 @@ namespace Server
                                     else
                                         getFile += "__" + DataMessage[i];
 
-                                byte[] byteFile = File.ReadAllBytes(Users[ViewModelSend.Id].temp_src + getFile);
+                                byte[] byteFile = File.ReadAllBytes(Users[viewModelSend.Id].temp_src + getFile);
                                 viewModelMessage = new ViewModelMessage("file", JsonConvert.SerializeObject(byteFile));
                             }
                             else
@@ -147,10 +149,10 @@ namespace Server
                         }
                         else
                         {
-                            if (ViewModelSend.Id != -1)
+                            if (viewModelSend.Id != -1)
                             {
-                                FileInfoFTP SendFileInfo = JsonConvert.DeserializeObject<FileInfoFTP>(ViewModelSend.Message);
-                                File.WriteAllBytes(Users[ViewModelSend.Id].temp_src + @"\" + SendFileInfo.Name, SendFileInfo.Data);
+                                FileInfoFTP SendFileInfo = JsonConvert.DeserializeObject<FileInfoFTP>(viewModelSend.Message);
+                                File.WriteAllBytes(Users[viewModelSend.Id].temp_src + @"\" + SendFileInfo.Name, SendFileInfo.Data);
                                 viewModelMessage = new ViewModelMessage("message", "Файл загружен");
                             }
                             else
