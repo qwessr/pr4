@@ -9,7 +9,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
-using Newtonoft.Json;
+using Common;
+using MongoDB.Bson.IO;
 
 namespace Client
 {
@@ -31,7 +32,7 @@ namespace Client
                 Console.WriteLine("Данные успешно введены. Подключаюсь к сервер.");
                 while (true)
                 {
-                    ConnectServer();
+                    Connection();
                 }
             }
         }
@@ -87,7 +88,7 @@ namespace Client
         {
             try
             {
-                IPEndPoint endpoint = new IPEndPoint(IPAdress, Port);
+                IPEndPoint endpoint = new IPEndPoint(IpAdress, Port);
                 Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 socket.Connect(endpoint);
 
