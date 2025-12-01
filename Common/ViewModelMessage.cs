@@ -1,24 +1,23 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Common
+﻿namespace Common
 {
     public class ViewModelMessage
     {
-        /// <summary> Команда </summary>
-        public string Command { get; set; }
+        /// <summary> Тип сообщения  </summary>
+        public string TypeMessage { get; set; }
 
-        /// <summary> Текст ответа </summary>
-        public string Data { get; set; }
+        /// <summary> Данные сообщения  </summary>
+        public string Message { get; set; }
 
-        /// <summary> Конструктор для заполнения данных </summary>
-        public ViewModelMessage(string Command, string Data)
+        public ViewModelMessage()
         {
-            this.Command = Command;
-            this.Data = Data;
+            TypeMessage = "";
+            Message = "";
+        }
+
+        public ViewModelMessage(string typeMessage, string message)
+        {
+            TypeMessage = typeMessage;
+            Message = message;
         }
     }
 }

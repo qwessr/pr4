@@ -1,17 +1,10 @@
-﻿using System.Net;
-using System.Net.Sockets;
-using System.Text;
-using System;
+﻿using System;
 using System.IO;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
 using Common;
-using MongoDB.Bson.IO;
-
+using Newtonsoft.Json; 
 
 namespace Client
 {
@@ -30,7 +23,7 @@ namespace Client
             if (int.TryParse(sPort, out Port) && IPAddress.TryParse(sIpAdress, out IpAdress))
             {
                 Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine("Данные успешно введены. Подключаюсь к сервер.");
+                Console.WriteLine("Данные успешно введены. Подключаюсь к серверу.");
                 while (true)
                 {
                     Connection();
@@ -40,49 +33,8 @@ namespace Client
 
         public static bool CheckCommand(string message)
         {
-            bool BCommand = false;
-            string[] Datamessage = message.Split(new string[1] { " " }, StringSplitOptions.None);
-
-            if (Datamessage.Length > 0)
-            {
-                string Command = Datamessage[0];
-                if (Command == "connect")
-                {
-                    if (Datamessage.Length != 3)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine("Использование: connect [login] [password]\nПример: connect User1 P@sswOrd");
-                        BCommand = false;
-                    }
-                    else
-                        BCommand = true;
-                }
-                else if (Command == "cd")
-                    BCommand = true;
-                else if (Command == "get")
-                {
-                    if (Datamessage.Length == 1)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine("Использование: get [NameFile]\nПример: get Test.txt");
-                        BCommand = false;
-                    }
-                    else
-                        BCommand = true;
-                }
-                else if (Command == "set")
-                {
-                    if (Datamessage.Length == 1)
-                    {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine("Использование: set [NameFile]\nПример: set Test.txt");
-                        BCommand = false;
-                    }
-                    else
-                        BCommand = true;
-                }
-            }
-            return BCommand;
+            // Простая проверка на наличие текста
+            return !string.IsNullOrWhiteSpace(message);
         }
 
         public static void Connection()
@@ -100,80 +52,74 @@ namespace Client
 
                     if (CheckCommand(message))
                     {
-                        ViewModelSend viewModelSend = new ViewModelSend(message, id);
+                        ViewModelSend viewModelSend = new ViewModelSend(message, Id);
 
-                        if (message.Split(new string[] { " " }, StringSplitOptions.None)[0] == "set")
+                        // Логика отправки файла (set filename)
+                        string[] parts = message.Split(' ');
+                        if (parts[0] == "set" && parts.Length > 1)
                         {
-                            string[] DataMessage = message.Split(new string[] { " " }, StringSplitOptions.None);
-                            string NameFile = "";
-
-                            for (int i = 1; i < DataMessage.Length; i++)
+                            string nameFile = string.Join(" ", parts, 1, parts.Length - 1);
+                            if (File.Exists(nameFile))
                             {
-                                if (NameFile == "")
-                                    NameFile += DataMessage[i];
-                                else
-                                    NameFile += " " + DataMessage[i];
-                            }
-
-                            if (File.Exists(NameFile))
-                            {
-                                FileInfo fileInfo = new FileInfo(NameFile);
-                                FileInfoFTP fileInfoFTP = new FileInfoFTP(File.ReadAllBytes(NameFile), fileInfo.Name);
-                                viewModelSend = new ViewModelSend(JsonConvert.SerializeObject(fileInfoFTP), id);
+                                FileInfo fileInfo = new FileInfo(nameFile);
+                                FileInfoFTP fileInfoFTP = new FileInfoFTP(File.ReadAllBytes(nameFile), fileInfo.Name);
+                                viewModelSend = new ViewModelSend(JsonConvert.SerializeObject(fileInfoFTP), Id);
                             }
                             else
                             {
-                                Console.ForegroundColor = ConsoleColor.Red;
-                                Console.WriteLine("Указанный файл не существует");
+                                Console.WriteLine("Файл не найден");
+                                return;
                             }
                         }
 
                         byte[] messageByte = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(viewModelSend));
-                        int ByteSent = socket.Send(messageByte);
-                        byte[] bytes = new byte[10485760];
-                        int ByteRec = socket.Receive(bytes);
-                        string messageServer = Encoding.UTF8.GetString(bytes, 0, ByteRec);
-                        ViewModelMessage viewModelMessage = JsonConvert.DeserializeObject<ViewModelMessage>(messageServer);
+                        socket.Send(messageByte);
 
-                        if (viewModelMessage.Command == "autorization")
-                            id = int.Parse(viewModelMessage.Data);
-                        else if (viewModelMessage.Command == "message")
-                            Console.WriteLine(viewModelMessage.Data);
-                        else if (viewModelMessage.Command == "cd")
+                        byte[] bytes = new byte[10485760]; // 10 MB
+                        int byteRec = socket.Receive(bytes);
+                        string messageServer = Encoding.UTF8.GetString(bytes, 0, byteRec);
+
+                        ViewModelMessage response = JsonConvert.DeserializeObject<ViewModelMessage>(messageServer);
+
+                        if (response.TypeMessage == "authorization" || response.TypeMessage == "autorization")
                         {
-                            List<string> FoldersFiles = new List<string>();
-                            FoldersFiles = JsonConvert.DeserializeObject<List<string>>(viewModelMessage.Data);
-                            foreach (string name in FoldersFiles)
-                                Console.WriteLine(name);
+                            Id = int.Parse(response.Message);
+                            Console.WriteLine($"Авторизован. ID: {Id}");
                         }
-                        else if (viewModelMessage.Command == "file")
+                        else if (response.TypeMessage == "message")
                         {
-                            string[] DataMessage = viewModelSend.Message.Split(new string[] { " " }, StringSplitOptions.None);
-                            string getFile = "";
-
-                            for (int i = 1; i < DataMessage.Length; i++)
+                            Console.WriteLine(response.Message);
+                        }
+                        else if (response.TypeMessage == "cd" || response.TypeMessage == "list")
+                        {
+                            // Если сервер присылает JSON объект 
+                            try
                             {
-                                if (getFile == "")
-                                    getFile += DataMessage[i];
-                                else
-                                    getFile += " " + DataMessage[i];
+                                // Пытаемся распарсить как старый список
+                                var list = JsonConvert.DeserializeObject<System.Collections.Generic.List<string>>(response.Message);
+                                foreach (var item in list) Console.WriteLine(item);
                             }
+                            catch
+                            {
+                                // Или просто выводим данные
+                                Console.WriteLine(response.Message);
+                            }
+                        }
+                        else if (response.TypeMessage == "file")
+                        {
+                            string getFile = "downloaded_file";
+                            if (parts[0] == "get" && parts.Length > 1) getFile = parts[1];
 
-                            byte[] byteFile = JsonConvert.DeserializeObject<byte[]>(viewModelMessage.Data);
+                            byte[] byteFile = JsonConvert.DeserializeObject<byte[]>(response.Message);
                             File.WriteAllBytes(getFile, byteFile);
+                            Console.WriteLine("Файл скачан.");
                         }
                     }
-                }
-                else
-                {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("Подключение не удалось.");
                 }
             }
             catch (Exception exp)
             {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine("Что-то случилось - " + exp.Message);
+                Console.WriteLine("Ошибка: " + exp.Message);
             }
         }
     }

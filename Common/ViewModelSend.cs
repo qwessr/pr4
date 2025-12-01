@@ -1,17 +1,16 @@
-﻿namespace Common;
-
-public class ViewModelSend
+﻿namespace Common
 {
-    /// <summary> Сообщение отправляемое сервером </summary>
-    public string Message { get; set; }
-
-    /// <summary> Код пользователя </summary>
-    public int Id { get; set; }
-
-    /// <summary> Конструктор для заполнения класса </summary>
-    public ViewModelSend(string message, int Id)
+    public class ViewModelSend
     {
-        this.Message = message;
-        this.Id = Id;
+        public string Message { get; set; }
+        public int Id { get; set; }
+
+        public ViewModelSend() { }
+
+        public ViewModelSend(string message, int id)
+        {
+            Message = message;
+            Id = id;
+        }
     }
 }

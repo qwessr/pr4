@@ -1,0 +1,6 @@
+﻿<Window x:Class="WpfClient.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="История команд" Height="300" Width="400">
+    <ListBox x:Name="ListHistory"/>
+</Window>
