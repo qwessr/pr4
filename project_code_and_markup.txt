@@ -1,0 +1,2213 @@
+--- FILE: C:\Users\tanki\source\repos\pr444\Client\Program.cs --- 
+﻿using System;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using Common;
+using Newtonsoft.Json;
+
+namespace Client
+{
+    class Program
+    {
+        public static IPAddress IpAdress;
+        public static int Port;
+        public static int Id = -1;
+
+        static void Main(string[] args)
+        {
+            Console.Write("Введите IP адрес сервера: ");
+            string sIpAdress = Console.ReadLine();
+            Console.Write("Введите порт: ");
+            string sPort = Console.ReadLine();
+            if (int.TryParse(sPort, out Port) && IPAddress.TryParse(sIpAdress, out IpAdress))
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("Данные успешно введены. Подключаюсь к серверу.");
+                while (true)
+                {
+                    Connection();
+                }
+            }
+        }
+
+        public static bool CheckCommand(string message)
+        {
+            // Простая проверка на наличие текста
+            return !string.IsNullOrWhiteSpace(message);
+        }
+
+        public static void Connection()
+        {
+            try
+            {
+                IPEndPoint endpoint = new IPEndPoint(IpAdress, Port);
+                Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                socket.Connect(endpoint);
+
+                if (socket.Connected)
+                {
+                    Console.ForegroundColor = ConsoleColor.White;
+                    string message = Console.ReadLine();
+
+                    if (CheckCommand(message))
+                    {
+                        ViewModelSend viewModelSend = new ViewModelSend(message, Id);
+
+                        string[] parts = message.Split(' ');
+                        if (parts[0].ToLower() == "set" && parts.Length > 1)
+                        {
+                            string nameFile = string.Join(" ", parts.Skip(1)).Replace("\"", "");
+                            if (File.Exists(nameFile))
+                            {
+                                FileInfo info = new FileInfo(nameFile);
+                                byte[] fileData = File.ReadAllBytes(nameFile);
+                                FileInfoFTP fileInfoFTP = new FileInfoFTP(fileData, info.Name);
+                                viewModelSend = new ViewModelSend(JsonConvert.SerializeObject(fileInfoFTP), Id);
+                            }
+                            else
+                            {
+                                Console.WriteLine("Файл для отправки не найден локально.");
+                                return;
+                            }
+                        }
+
+                        // Отправка запроса
+                        byte[] messageByte = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(viewModelSend));
+                        socket.Send(messageByte);
+
+                        // Получение ответа
+                        byte[] bytes = new byte[10485760]; // 10 MB
+                        int byteRec = socket.Receive(bytes);
+                        string messageServer = Encoding.UTF8.GetString(bytes, 0, byteRec);
+
+                        ViewModelMessage response = JsonConvert.DeserializeObject<ViewModelMessage>(messageServer);
+
+
+                        if (response.TypeMessage == "authorization" || response.TypeMessage == "autorization")
+                        {
+                            Id = int.Parse(response.Message);
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine($"Успешный вход! Ваш ID: {Id}");
+                        }
+                        else if (response.TypeMessage == "message")
+                        {
+                            Console.WriteLine(response.Message);
+                        }
+                        else if (response.TypeMessage == "file")
+                        {
+                            var fileReceived = JsonConvert.DeserializeObject<FileInfoFTP>(response.Message);
+
+                            File.WriteAllBytes(fileReceived.Name, fileReceived.Data);
+
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"[СИСТЕМА]: Файл '{fileReceived.Name}' успешно получен и сохранен.");
+                        }
+                    }
+                }
+            }
+            catch (Exception exp)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("Ошибка: " + exp.Message);
+            }
+
+        }
+    }
+}
+--- FILE: C:\Users\tanki\source\repos\pr444\Client\obj\Debug\net9.0\.NETCoreApp,Version=v9.0.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v9.0", FrameworkDisplayName = ".NET 9.0")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Client\obj\Debug\net9.0\Client.AssemblyInfo.cs --- 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("Client")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e6612b89ceaa18ab32de1ec013a632041e75322b")]
+[assembly: System.Reflection.AssemblyProductAttribute("Client")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Client")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Создано классом WriteCodeFragment MSBuild.
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Client\obj\Debug\net9.0\Client.GlobalUsings.g.cs --- 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Common\FileInfoFTP.cs --- 
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace Common
+{
+    public class FileInfoFTP
+    {
+        public byte[] Data { get; set; }
+        public string Name { get; set; }
+        public FileInfoFTP(byte[] data, string name) { Data = data; Name = name; }
+    }
+
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Common\ViewModelMessage.cs --- 
+﻿namespace Common
+{
+    public class ViewModelMessage
+    {
+        public string TypeMessage { get; set; }
+        public string Message { get; set; }
+        public ViewModelMessage(string type, string msg) { TypeMessage = type; Message = msg; }
+    }
+}
+    
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Common\ViewModelSend.cs --- 
+﻿namespace Common
+{
+    public class ViewModelSend
+    {
+        public string Message { get; set; }
+        public int Id { get; set; }
+        public ViewModelSend(string message, int id) { Message = message; Id = id; }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Common\obj\Debug\netstandard2.0\.NETStandard,Version=v2.0.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETStandard,Version=v2.0", FrameworkDisplayName = ".NET Standard 2.0")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Common\obj\Debug\netstandard2.0\Common.AssemblyInfo.cs --- 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("Common")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e6612b89ceaa18ab32de1ec013a632041e75322b")]
+[assembly: System.Reflection.AssemblyProductAttribute("Common")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Common")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Создано классом WriteCodeFragment MSBuild.
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\ConsoleApp1\Program.cs --- 
+﻿// See https://aka.ms/new-console-template for more information
+Console.WriteLine("Hello, World!");
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\FTP\Program.cs --- 
+﻿// See https://aka.ms/new-console-template for more information
+Console.WriteLine("Hello, World!");
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\Program.cs --- 
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Linq;
+using Common;
+using Newtonsoft.Json;
+using MySqlConnector;
+
+namespace Server
+{
+    class Program
+    {
+        private static string connStr = "Server=127.0.0.1;Database=FTPStorage;User=root;Password=;SslMode=None;Charset=utf8;";
+        private static Dictionary<int, string> userPaths = new Dictionary<int, string>();
+
+        static void Main(string[] args)
+        {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            Console.OutputEncoding = Encoding.UTF8;
+
+            TcpListener listener = new TcpListener(IPAddress.Any, 8888);
+            listener.Start();
+            Console.WriteLine(">>> FTP Сервер (Финальная версия) запущен...");
+
+            while (true)
+            {
+                try
+                {
+                    using Socket client = listener.AcceptSocket();
+                    byte[] buffer = new byte[10485760]; // 10MB
+                    int rec = client.Receive(buffer);
+                    if (rec == 0) continue;
+
+                    string json = Encoding.UTF8.GetString(buffer, 0, rec);
+                    var request = JsonConvert.DeserializeObject<ViewModelSend>(json);
+                    if (request == null) continue;
+
+                    if (request.Id != -1) SaveHistory(request.Id, request.Message);
+
+                    Console.WriteLine($"[Команда]: {request.Message} (User ID: {request.Id})");
+
+                    ViewModelMessage response = ProcessRequest(request);
+
+                    byte[] respBytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(response));
+                    client.Send(respBytes);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Ошибка]: {ex.Message}");
+                }
+            }
+        }
+
+        static ViewModelMessage ProcessRequest(ViewModelSend req)
+        {
+            if (string.IsNullOrWhiteSpace(req.Message)) return new ViewModelMessage("message", "Пустой запрос");
+
+            string[] parts = req.Message.Split(' ');
+            string cmd = parts[0].ToLower();
+
+            try
+            {
+                switch (cmd)
+                {
+                    case "register": return HandleRegister(parts);
+                    case "connect": return HandleConnect(parts);
+                    case "cd": return HandleCD(req);
+                    case "get": return HandleGet(req, parts);
+                    default: return HandleFileUpload(req);    
+                }
+            }
+            catch (Exception ex)
+            {
+                return new ViewModelMessage("message", "Ошибка сервера: " + ex.Message);
+            }
+        }
+
+
+        static ViewModelMessage HandleRegister(string[] p)
+        {
+            if (p.Length < 4) return new ViewModelMessage("message", "Нужно: register логин пароль путь");
+
+            string rawPath = string.Join(" ", p.Skip(3)).Replace("\"", "").Trim();
+
+            using var conn = new MySqlConnection(connStr);
+            conn.Open();
+            var cmd = new MySqlCommand("INSERT INTO Users (login, password, src) VALUES (@l, @p, @s)", conn);
+            cmd.Parameters.AddWithValue("@l", p[1]);
+            cmd.Parameters.AddWithValue("@p", p[2]);
+            cmd.Parameters.AddWithValue("@s", rawPath);
+            cmd.ExecuteNonQuery();
+
+            if (!Directory.Exists(rawPath)) Directory.CreateDirectory(rawPath);
+
+            return new ViewModelMessage("message", "Регистрация успешна. Директория готова.");
+        }
+
+        static ViewModelMessage HandleConnect(string[] p)
+        {
+            if (p.Length < 3) return new ViewModelMessage("message", "Нужно: connect логин пароль");
+            using var conn = new MySqlConnection(connStr);
+            conn.Open();
+            var cmd = new MySqlCommand("SELECT id, src FROM Users WHERE login=@l AND password=@p", conn);
+            cmd.Parameters.AddWithValue("@l", p[1]);
+            cmd.Parameters.AddWithValue("@p", p[2]);
+
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                int id = r.GetInt32(0);
+                userPaths[id] = r.GetString(1);
+                return new ViewModelMessage("authorization", id.ToString());
+            }
+            return new ViewModelMessage("message", "Ошибка авторизации.");
+        }
+
+
+        static void SaveHistory(int userId, string command)
+        {
+            try
+            {
+                using var conn = new MySqlConnection(connStr);
+                conn.Open();
+                var cmd = new MySqlCommand("INSERT INTO History (user_id, command) VALUES (@u, @c)", conn);
+                cmd.Parameters.AddWithValue("@u", userId);
+                cmd.Parameters.AddWithValue("@c", command);
+                cmd.ExecuteNonQuery();
+            }
+            catch { /* Игнорируем ошибки записи истории */ }
+        }
+
+        static ViewModelMessage HandleCD(ViewModelSend req)
+        {
+            if (!userPaths.ContainsKey(req.Id)) return new ViewModelMessage("message", "Сначала connect");
+
+            string path = userPaths[req.Id];
+            if (!Directory.Exists(path)) return new ViewModelMessage("message", "Путь не найден: " + path);
+
+            var files = Directory.GetFileSystemEntries(path).Select(Path.GetFileName).ToList();
+            return new ViewModelMessage("message", "Файлы: " + string.Join(", ", files));
+        }
+
+
+        static ViewModelMessage HandleGet(ViewModelSend req, string[] p)
+        {
+            if (p.Length < 2) return new ViewModelMessage("message", "Укажите имя файла");
+            if (!userPaths.ContainsKey(req.Id)) return new ViewModelMessage("message", "Нужна авторизация");
+
+            string fullPath = Path.Combine(userPaths[req.Id], p[1]);
+            if (File.Exists(fullPath))
+            {
+                byte[] data = File.ReadAllBytes(fullPath);
+                FileInfoFTP file = new FileInfoFTP(data, p[1]);
+
+                return new ViewModelMessage("file", JsonConvert.SerializeObject(file));
+            }
+            return new ViewModelMessage("message", "Файл не найден.");
+        }
+
+        static ViewModelMessage HandleFileUpload(ViewModelSend req)
+        {
+            try
+            {
+                var file = JsonConvert.DeserializeObject<FileInfoFTP>(req.Message);
+                if (file != null && userPaths.ContainsKey(req.Id))
+                {
+                    string savePath = Path.Combine(userPaths[req.Id], file.Name);
+                    File.WriteAllBytes(savePath, file.Data);
+                    return new ViewModelMessage("message", $"Файл '{file.Name}' загружен на сервер.");
+                }
+            }
+            catch { }
+            return new ViewModelMessage("message", "Неизвестная команда.");
+        }
+    }
+}.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\User.cs --- 
+﻿namespace Server
+{
+    public class User
+    {
+        /// <summary> Логин пользователя </summary>
+        public string login { get; set; }
+        /// <summary> Пароль пользователя </summary>
+        public string password { get; set; }
+        /// <summary> Директория пользователя </summary>
+        public string src { get; set; }
+        /// <summary> Директория пользователя в которой он находится </summary>
+        public string temp_src { get; set; }
+        /// <summary> Конструктор для заполнения класса </summary>
+        public User(string login, string password, string src)
+        {
+            this.login = login;
+            this.password = password;
+            this.src = src;
+
+            temp_src = src;
+        }
+    }
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net6.0\.NETCoreApp,Version=v6.0.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v6.0", FrameworkDisplayName = ".NET 6.0")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net6.0\Server.AssemblyInfo.cs --- 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("Server")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e6612b89ceaa18ab32de1ec013a632041e75322b")]
+[assembly: System.Reflection.AssemblyProductAttribute("Server")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Server")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Создано классом WriteCodeFragment MSBuild.
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net6.0\Server.GlobalUsings.g.cs --- 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net8.0\.NETCoreApp,Version=v8.0.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v8.0", FrameworkDisplayName = ".NET 8.0")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net8.0\Server.AssemblyInfo.cs --- 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("Server")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e6612b89ceaa18ab32de1ec013a632041e75322b")]
+[assembly: System.Reflection.AssemblyProductAttribute("Server")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Server")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Создано классом WriteCodeFragment MSBuild.
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net8.0\Server.GlobalUsings.g.cs --- 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net9.0\.NETCoreApp,Version=v9.0.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v9.0", FrameworkDisplayName = ".NET 9.0")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net9.0\Server.AssemblyInfo.cs --- 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("Server")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e6612b89ceaa18ab32de1ec013a632041e75322b")]
+[assembly: System.Reflection.AssemblyProductAttribute("Server")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Server")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Создано классом WriteCodeFragment MSBuild.
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\net9.0\Server.GlobalUsings.g.cs --- 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\netcoreapp3.1\.NETCoreApp,Version=v3.1.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v3.1", FrameworkDisplayName = ".NET Core 3.1")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\netcoreapp3.1\Server.AssemblyInfo.cs --- 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("Server")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e6612b89ceaa18ab32de1ec013a632041e75322b")]
+[assembly: System.Reflection.AssemblyProductAttribute("Server")]
+[assembly: System.Reflection.AssemblyTitleAttribute("Server")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Создано классом WriteCodeFragment MSBuild.
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\Server\obj\Debug\netcoreapp3.1\Server.GlobalUsings.g.cs --- 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\App.xaml.cs --- 
+﻿using System;
+using System.Collections.Generic;
+using System.Configuration;
+using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+
+namespace WpfClient
+{
+    /// <summary>
+    /// Логика взаимодействия для App.xaml
+    /// </summary>
+    public partial class App : Application
+    {
+    }
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\HistoryWindow.xaml.cs --- 
+﻿using System.Collections.Generic;
+using System.Windows;
+
+namespace WpfClient
+{
+    public partial class HistoryWindow : Window
+    {
+        public HistoryWindow(List<string> history)
+        {
+            InitializeComponent();
+            ListHistory.ItemsSource = history;
+        }
+    }
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\MainWindow.xaml.cs --- 
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Windows;
+using System.Windows.Controls;
+using Microsoft.Win32;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using Common;
+using System.Xml.Linq;
+
+namespace WpfClient
+{
+    public partial class MainWindow : Window
+    {
+        private string serverIP = "127.0.0.1";
+        private int serverPort = 8888;
+        private int userId = -1;
+
+        public MainWindow()
+        {
+            InitializeComponent();
+        }
+
+        // --- СЕТЕВАЯ ЧАСТЬ ---
+        private ViewModelMessage SendRequest(string message)
+        {
+            try
+            {
+                IPEndPoint endPoint = new IPEndPoint(IPAddress.Parse(serverIP), serverPort);
+                using (Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+                {
+                    socket.Connect(endPoint);
+
+                    // Отправка
+                    var request = new ViewModelSend(message, userId);
+                    byte[] data = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(request));
+                    socket.Send(data);
+
+                    // Получение
+                    byte[] buffer = new byte[10485760];
+                    int received = socket.Receive(buffer);
+                    string responseStr = Encoding.UTF8.GetString(buffer, 0, received);
+
+                    return JsonConvert.DeserializeObject<ViewModelMessage>(responseStr);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сети: {ex.Message}");
+                return null;
+            }
+        }
+
+        // --- ЛОГИКА ИНТЕРФЕЙСА ---
+
+        private void BtnLogin_Click(object sender, RoutedEventArgs e)
+        {
+            serverIP = TxtServer.Text;
+            serverPort = int.Parse(TxtPort.Text);
+            string cmd = $"connect {TxtLogin.Text} {TxtPassword.Password}";
+
+            var response = SendRequest(cmd);
+            if (response != null && response.TypeMessage == "authorization")
+            {
+                userId = int.Parse(response.Message);
+                TxtStatus.Text = $"ID: {userId}. Авторизован.";
+
+                // Включаем кнопки
+                BtnRefresh.IsEnabled = true;
+                BtnUpload.IsEnabled = true;
+                BtnHistory.IsEnabled = true;
+                PanelAuth.IsEnabled = false; // Блокируем поля ввода
+
+                LoadFiles();
+            }
+            else
+            {
+                MessageBox.Show(response?.Message ?? "Ошибка подключения");
+            }
+        }
+
+        private void BtnRegister_Click(object sender, RoutedEventArgs e)
+        {
+            // Открываем окно регистрации
+            RegisterWindow rw = new RegisterWindow(TxtServer.Text, int.Parse(TxtPort.Text));
+            rw.Owner = this;
+            rw.ShowDialog();
+        }
+
+        private void LoadFiles()
+        {
+            var response = SendRequest("cd");
+            if (response != null && response.TypeMessage == "cd")
+            {
+                try
+                {
+                    // Парсим сложный JSON ответ от сервера (путь + список)
+                    JObject obj = JObject.Parse(response.Message);
+                    string path = obj["currentPath"].ToString();
+                    List<string> items = obj["items"].ToObject<List<string>>();
+
+                    TxtCurrentPath.Text = $"Путь: {path}";
+                    ListViewFiles.Items.Clear();
+
+                    foreach (var item in items)
+                    {
+                        bool isDir = item.EndsWith("/");
+                        ListViewFiles.Items.Add(new FileItem
+                        {
+                            Name = item,
+                            DisplayName = item,
+                            Type = isDir ? "📁 Папка" : "📄 Файл",
+                            DownloadVisible = isDir ? Visibility.Collapsed : Visibility.Visible
+                        });
+                    }
+                }
+                catch { MessageBox.Show("Ошибка чтения списка файлов"); }
+            }
+        }
+
+        private void ListViewFiles_DoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            if (ListViewFiles.SelectedItem is FileItem item && item.Name.EndsWith("/"))
+            {
+                string folder = item.Name.TrimEnd('/'); // Убираем слеш
+                SendRequest($"cd {folder}");
+                LoadFiles();
+            }
+        }
+
+        private void BtnRefresh_Click(object sender, RoutedEventArgs e) => LoadFiles();
+
+        private void BtnDownload_Click(object sender, RoutedEventArgs e)
+        {
+            string fileName = ((Button)sender).Tag.ToString();
+            SaveFileDialog sfd = new SaveFileDialog { FileName = fileName };
+
+            if (sfd.ShowDialog() == true)
+            {
+                var response = SendRequest($"get {fileName}");
+                if (response.TypeMessage == "file")
+                {
+                    byte[] data = JsonConvert.DeserializeObject<byte[]>(response.Message);
+                    File.WriteAllBytes(sfd.FileName, data);
+                    MessageBox.Show("Файл скачан!");
+                }
+                else MessageBox.Show("Ошибка скачивания");
+            }
+        }
+
+        private void BtnUpload_Click(object sender, RoutedEventArgs e)
+        {
+            OpenFileDialog ofd = new OpenFileDialog();
+            if (ofd.ShowDialog() == true)
+            {
+                byte[] data = File.ReadAllBytes(ofd.FileName);
+                var fileInfo = new FileInfoFTP(data, Path.GetFileName(ofd.FileName));
+
+                SendRequest(JsonConvert.SerializeObject(fileInfo)); // Отправка JSON файла
+                LoadFiles();
+                MessageBox.Show("Файл загружен!");
+            }
+        }
+
+        private void BtnHistory_Click(object sender, RoutedEventArgs e)
+        {
+            var response = SendRequest("history");
+            if (response != null && response.TypeMessage == "history")
+            {
+                List<string> history = JsonConvert.DeserializeObject<List<string>>(response.Message);
+                new HistoryWindow(history).ShowDialog();
+            }
+        }
+    }
+
+    // Вспомогательный класс для WPF
+    public class FileItem
+    {
+        public string Name { get; set; }
+        public string DisplayName { get; set; }
+        public string Type { get; set; }
+        public Visibility DownloadVisible { get; set; }
+    }
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\RegisterWindow.xaml.cs --- 
+﻿using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Windows;
+using Common;
+using Newtonsoft.Json;
+
+namespace WpfClient
+{
+    public partial class RegisterWindow : Window
+    {
+        string ip; int port;
+        public RegisterWindow(string ip, int port) { InitializeComponent(); this.ip = ip; this.port = port; }
+
+        private void BtnReg_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Отправка запроса регистрации без авторизации (id = -1)
+                var req = new ViewModelSend($"register {TxtRegLogin.Text} {TxtRegPass.Text} {TxtRegPath.Text}", -1);
+
+                using (Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
+                {
+                    s.Connect(new IPEndPoint(IPAddress.Parse(ip), port));
+                    s.Send(Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(req)));
+
+                    byte[] buf = new byte[1024];
+                    int rec = s.Receive(buf);
+                    var resp = JsonConvert.DeserializeObject<ViewModelMessage>(Encoding.UTF8.GetString(buf, 0, rec));
+
+                    MessageBox.Show(resp.Message);
+                    if (resp.Message.Contains("успешна")) Close();
+                }
+            }
+            catch { MessageBox.Show("Ошибка регистрации"); }
+        }
+    }
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\App.xaml --- 
+﻿<Application x:Class="WpfClient.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:WpfClient"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+         
+    </Application.Resources>
+</Application>
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\HistoryWindow.xaml --- 
+﻿<Window x:Class="WpfClient.HistoryWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="История команд" Height="300" Width="400">
+    <ListBox x:Name="ListHistory"/>
+</Window>
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\MainWindow.xaml --- 
+﻿<Window x:Class="WpfClient.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="FTP Client" Height="500" Width="800">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Верхняя панель: Вход -->
+        <StackPanel Grid.Row="0" Background="#EEE">
+            <StackPanel x:Name="PanelAuth" Orientation="Horizontal" Margin="10">
+                <TextBox x:Name="TxtServer" Text="127.0.0.1" Width="100" Margin="5"/>
+                <TextBox x:Name="TxtPort" Text="8888" Width="50" Margin="5"/>
+                <TextBox x:Name="TxtLogin" Width="100" Margin="5" Text="admin"/>
+                <PasswordBox x:Name="TxtPassword" Width="100" Margin="5"/>
+                <Button Content="Войти" Click="BtnLogin_Click" Width="80" Margin="5"/>
+                <Button Content="Регистрация" Click="BtnRegister_Click" Width="100" Margin="5"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="10,0,10,10">
+                <TextBlock x:Name="TxtCurrentPath" Text="Путь: не подключен" FontWeight="Bold" VerticalAlignment="Center"/>
+                <Button x:Name="BtnRefresh" Content="Обновить" Click="BtnRefresh_Click" Margin="20,0,5,0" IsEnabled="False"/>
+                <Button x:Name="BtnUpload" Content="Загрузить файл" Click="BtnUpload_Click" Margin="5,0,5,0" IsEnabled="False"/>
+                <Button x:Name="BtnHistory" Content="История" Click="BtnHistory_Click" Margin="5,0,5,0" IsEnabled="False"/>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Список файлов -->
+        <ListView x:Name="ListViewFiles" Grid.Row="1" MouseDoubleClick="ListViewFiles_DoubleClick" Margin="10">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Тип" Width="80" DisplayMemberBinding="{Binding Type}"/>
+                    <GridViewColumn Header="Имя" Width="300" DisplayMemberBinding="{Binding DisplayName}"/>
+                    <GridViewColumn Header="Действие" Width="100">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <Button Content="Скачать" Click="BtnDownload_Click" Tag="{Binding Name}" Visibility="{Binding DownloadVisible}"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- Статус бар -->
+        <StatusBar Grid.Row="2">
+            <TextBlock x:Name="TxtStatus" Text="Готов"/>
+        </StatusBar>
+    </Grid>
+</Window>
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\RegisterWindow.xaml --- 
+﻿<Window x:Class="WpfClient.RegisterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Регистрация" Height="250" Width="300">
+    <StackPanel Margin="20">
+        <TextBlock Text="Логин:"/>
+        <TextBox x:Name="TxtRegLogin" Margin="0,0,0,10"/>
+        <TextBlock Text="Пароль:"/>
+        <TextBox x:Name="TxtRegPass" Margin="0,0,0,10"/>
+        <TextBlock Text="Папка (на сервере):"/>
+        <TextBox x:Name="TxtRegPath" Margin="0,0,0,10" Text="C:\FTPStorage\User1"/>
+
+        <Button Content="Зарегистрироваться" Click="BtnReg_Click" Height="30"/>
+    </StackPanel>
+</Window>
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\.NETFramework,Version=v4.8.AssemblyAttributes.cs --- 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETFramework,Version=v4.8", FrameworkDisplayName = ".NET Framework 4.8")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\App.g.cs --- 
+﻿#pragma checksum "..\..\App.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "D82ABFA9E0C53C1F8682290645A78A982AF786A4218F908550199BAABF172CA6"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+using WpfClient;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// App
+    /// </summary>
+    public partial class App : System.Windows.Application {
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            
+            #line 5 "..\..\App.xaml"
+            this.StartupUri = new System.Uri("MainWindow.xaml", System.UriKind.Relative);
+            
+            #line default
+            #line hidden
+        }
+        
+        /// <summary>
+        /// Application Entry Point.
+        /// </summary>
+        [System.STAThreadAttribute()]
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public static void Main() {
+            WpfClient.App app = new WpfClient.App();
+            app.InitializeComponent();
+            app.Run();
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\App.g.i.cs --- 
+﻿#pragma checksum "..\..\App.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "D82ABFA9E0C53C1F8682290645A78A982AF786A4218F908550199BAABF172CA6"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+using WpfClient;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// App
+    /// </summary>
+    public partial class App : System.Windows.Application {
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            
+            #line 5 "..\..\App.xaml"
+            this.StartupUri = new System.Uri("MainWindow.xaml", System.UriKind.Relative);
+            
+            #line default
+            #line hidden
+        }
+        
+        /// <summary>
+        /// Application Entry Point.
+        /// </summary>
+        [System.STAThreadAttribute()]
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public static void Main() {
+            WpfClient.App app = new WpfClient.App();
+            app.InitializeComponent();
+            app.Run();
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\HistoryWindow.g.cs --- 
+﻿#pragma checksum "..\..\HistoryWindow.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "6E63E826DAF24412E8BCB91502DEA75181C000C82AFDD13E1AE5DC99877C4320"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// HistoryWindow
+    /// </summary>
+    public partial class HistoryWindow : System.Windows.Window, System.Windows.Markup.IComponentConnector {
+        
+        
+        #line 5 "..\..\HistoryWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.ListBox ListHistory;
+        
+        #line default
+        #line hidden
+        
+        private bool _contentLoaded;
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            if (_contentLoaded) {
+                return;
+            }
+            _contentLoaded = true;
+            System.Uri resourceLocater = new System.Uri("/WpfClient;component/historywindow.xaml", System.UriKind.Relative);
+            
+            #line 1 "..\..\HistoryWindow.xaml"
+            System.Windows.Application.LoadComponent(this, resourceLocater);
+            
+            #line default
+            #line hidden
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        void System.Windows.Markup.IComponentConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 1:
+            this.ListHistory = ((System.Windows.Controls.ListBox)(target));
+            return;
+            }
+            this._contentLoaded = true;
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\HistoryWindow.g.i.cs --- 
+﻿#pragma checksum "..\..\HistoryWindow.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "6E63E826DAF24412E8BCB91502DEA75181C000C82AFDD13E1AE5DC99877C4320"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// HistoryWindow
+    /// </summary>
+    public partial class HistoryWindow : System.Windows.Window, System.Windows.Markup.IComponentConnector {
+        
+        
+        #line 5 "..\..\HistoryWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.ListBox ListHistory;
+        
+        #line default
+        #line hidden
+        
+        private bool _contentLoaded;
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            if (_contentLoaded) {
+                return;
+            }
+            _contentLoaded = true;
+            System.Uri resourceLocater = new System.Uri("/WpfClient;component/historywindow.xaml", System.UriKind.Relative);
+            
+            #line 1 "..\..\HistoryWindow.xaml"
+            System.Windows.Application.LoadComponent(this, resourceLocater);
+            
+            #line default
+            #line hidden
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        void System.Windows.Markup.IComponentConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 1:
+            this.ListHistory = ((System.Windows.Controls.ListBox)(target));
+            return;
+            }
+            this._contentLoaded = true;
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\MainWindow.g.cs --- 
+﻿#pragma checksum "..\..\MainWindow.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "078D6A7E7F28CC1FC4393B967A46E888B57BA6099882A4E8C04D2FF30A41660A"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// MainWindow
+    /// </summary>
+    public partial class MainWindow : System.Windows.Window, System.Windows.Markup.IComponentConnector, System.Windows.Markup.IStyleConnector {
+        
+        
+        #line 14 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.StackPanel PanelAuth;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 15 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtServer;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 16 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtPort;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 17 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtLogin;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 18 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.PasswordBox TxtPassword;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 23 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBlock TxtCurrentPath;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 24 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.Button BtnRefresh;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 25 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.Button BtnUpload;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 26 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.Button BtnHistory;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 31 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.ListView ListViewFiles;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 49 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBlock TxtStatus;
+        
+        #line default
+        #line hidden
+        
+        private bool _contentLoaded;
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            if (_contentLoaded) {
+                return;
+            }
+            _contentLoaded = true;
+            System.Uri resourceLocater = new System.Uri("/WpfClient;component/mainwindow.xaml", System.UriKind.Relative);
+            
+            #line 1 "..\..\MainWindow.xaml"
+            System.Windows.Application.LoadComponent(this, resourceLocater);
+            
+            #line default
+            #line hidden
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        void System.Windows.Markup.IComponentConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 1:
+            this.PanelAuth = ((System.Windows.Controls.StackPanel)(target));
+            return;
+            case 2:
+            this.TxtServer = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 3:
+            this.TxtPort = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 4:
+            this.TxtLogin = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 5:
+            this.TxtPassword = ((System.Windows.Controls.PasswordBox)(target));
+            return;
+            case 6:
+            
+            #line 19 "..\..\MainWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnLogin_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 7:
+            
+            #line 20 "..\..\MainWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnRegister_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 8:
+            this.TxtCurrentPath = ((System.Windows.Controls.TextBlock)(target));
+            return;
+            case 9:
+            this.BtnRefresh = ((System.Windows.Controls.Button)(target));
+            
+            #line 24 "..\..\MainWindow.xaml"
+            this.BtnRefresh.Click += new System.Windows.RoutedEventHandler(this.BtnRefresh_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 10:
+            this.BtnUpload = ((System.Windows.Controls.Button)(target));
+            
+            #line 25 "..\..\MainWindow.xaml"
+            this.BtnUpload.Click += new System.Windows.RoutedEventHandler(this.BtnUpload_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 11:
+            this.BtnHistory = ((System.Windows.Controls.Button)(target));
+            
+            #line 26 "..\..\MainWindow.xaml"
+            this.BtnHistory.Click += new System.Windows.RoutedEventHandler(this.BtnHistory_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 12:
+            this.ListViewFiles = ((System.Windows.Controls.ListView)(target));
+            
+            #line 31 "..\..\MainWindow.xaml"
+            this.ListViewFiles.MouseDoubleClick += new System.Windows.Input.MouseButtonEventHandler(this.ListViewFiles_DoubleClick);
+            
+            #line default
+            #line hidden
+            return;
+            case 14:
+            this.TxtStatus = ((System.Windows.Controls.TextBlock)(target));
+            return;
+            }
+            this._contentLoaded = true;
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        void System.Windows.Markup.IStyleConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 13:
+            
+            #line 39 "..\..\MainWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnDownload_Click);
+            
+            #line default
+            #line hidden
+            break;
+            }
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\MainWindow.g.i.cs --- 
+﻿#pragma checksum "..\..\MainWindow.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "078D6A7E7F28CC1FC4393B967A46E888B57BA6099882A4E8C04D2FF30A41660A"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// MainWindow
+    /// </summary>
+    public partial class MainWindow : System.Windows.Window, System.Windows.Markup.IComponentConnector, System.Windows.Markup.IStyleConnector {
+        
+        
+        #line 14 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.StackPanel PanelAuth;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 15 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtServer;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 16 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtPort;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 17 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtLogin;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 18 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.PasswordBox TxtPassword;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 23 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBlock TxtCurrentPath;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 24 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.Button BtnRefresh;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 25 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.Button BtnUpload;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 26 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.Button BtnHistory;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 31 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.ListView ListViewFiles;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 49 "..\..\MainWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBlock TxtStatus;
+        
+        #line default
+        #line hidden
+        
+        private bool _contentLoaded;
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            if (_contentLoaded) {
+                return;
+            }
+            _contentLoaded = true;
+            System.Uri resourceLocater = new System.Uri("/WpfClient;component/mainwindow.xaml", System.UriKind.Relative);
+            
+            #line 1 "..\..\MainWindow.xaml"
+            System.Windows.Application.LoadComponent(this, resourceLocater);
+            
+            #line default
+            #line hidden
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        void System.Windows.Markup.IComponentConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 1:
+            this.PanelAuth = ((System.Windows.Controls.StackPanel)(target));
+            return;
+            case 2:
+            this.TxtServer = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 3:
+            this.TxtPort = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 4:
+            this.TxtLogin = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 5:
+            this.TxtPassword = ((System.Windows.Controls.PasswordBox)(target));
+            return;
+            case 6:
+            
+            #line 19 "..\..\MainWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnLogin_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 7:
+            
+            #line 20 "..\..\MainWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnRegister_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 8:
+            this.TxtCurrentPath = ((System.Windows.Controls.TextBlock)(target));
+            return;
+            case 9:
+            this.BtnRefresh = ((System.Windows.Controls.Button)(target));
+            
+            #line 24 "..\..\MainWindow.xaml"
+            this.BtnRefresh.Click += new System.Windows.RoutedEventHandler(this.BtnRefresh_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 10:
+            this.BtnUpload = ((System.Windows.Controls.Button)(target));
+            
+            #line 25 "..\..\MainWindow.xaml"
+            this.BtnUpload.Click += new System.Windows.RoutedEventHandler(this.BtnUpload_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 11:
+            this.BtnHistory = ((System.Windows.Controls.Button)(target));
+            
+            #line 26 "..\..\MainWindow.xaml"
+            this.BtnHistory.Click += new System.Windows.RoutedEventHandler(this.BtnHistory_Click);
+            
+            #line default
+            #line hidden
+            return;
+            case 12:
+            this.ListViewFiles = ((System.Windows.Controls.ListView)(target));
+            
+            #line 31 "..\..\MainWindow.xaml"
+            this.ListViewFiles.MouseDoubleClick += new System.Windows.Input.MouseButtonEventHandler(this.ListViewFiles_DoubleClick);
+            
+            #line default
+            #line hidden
+            return;
+            case 14:
+            this.TxtStatus = ((System.Windows.Controls.TextBlock)(target));
+            return;
+            }
+            this._contentLoaded = true;
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        void System.Windows.Markup.IStyleConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 13:
+            
+            #line 39 "..\..\MainWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnDownload_Click);
+            
+            #line default
+            #line hidden
+            break;
+            }
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\RegisterWindow.g.cs --- 
+﻿#pragma checksum "..\..\RegisterWindow.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "8136ACAB94D0B41294CBC484C67BDA1C9CD922F5C08737D99F570D725820307C"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// RegisterWindow
+    /// </summary>
+    public partial class RegisterWindow : System.Windows.Window, System.Windows.Markup.IComponentConnector {
+        
+        
+        #line 7 "..\..\RegisterWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtRegLogin;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 9 "..\..\RegisterWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtRegPass;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 11 "..\..\RegisterWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtRegPath;
+        
+        #line default
+        #line hidden
+        
+        private bool _contentLoaded;
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            if (_contentLoaded) {
+                return;
+            }
+            _contentLoaded = true;
+            System.Uri resourceLocater = new System.Uri("/WpfClient;component/registerwindow.xaml", System.UriKind.Relative);
+            
+            #line 1 "..\..\RegisterWindow.xaml"
+            System.Windows.Application.LoadComponent(this, resourceLocater);
+            
+            #line default
+            #line hidden
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        void System.Windows.Markup.IComponentConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 1:
+            this.TxtRegLogin = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 2:
+            this.TxtRegPass = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 3:
+            this.TxtRegPath = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 4:
+            
+            #line 13 "..\..\RegisterWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnReg_Click);
+            
+            #line default
+            #line hidden
+            return;
+            }
+            this._contentLoaded = true;
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\obj\Debug\RegisterWindow.g.i.cs --- 
+﻿#pragma checksum "..\..\RegisterWindow.xaml" "{8829d00f-11b8-4213-878b-770e8597ac16}" "8136ACAB94D0B41294CBC484C67BDA1C9CD922F5C08737D99F570D725820307C"
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код создан программой.
+//     Исполняемая версия:4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильной работе и будут потеряны в случае
+//     повторной генерации кода.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Automation;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Ink;
+using System.Windows.Input;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Media.Media3D;
+using System.Windows.Media.TextFormatting;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+using System.Windows.Shell;
+
+
+namespace WpfClient {
+    
+    
+    /// <summary>
+    /// RegisterWindow
+    /// </summary>
+    public partial class RegisterWindow : System.Windows.Window, System.Windows.Markup.IComponentConnector {
+        
+        
+        #line 7 "..\..\RegisterWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtRegLogin;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 9 "..\..\RegisterWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtRegPass;
+        
+        #line default
+        #line hidden
+        
+        
+        #line 11 "..\..\RegisterWindow.xaml"
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1823:AvoidUnusedPrivateFields")]
+        internal System.Windows.Controls.TextBox TxtRegPath;
+        
+        #line default
+        #line hidden
+        
+        private bool _contentLoaded;
+        
+        /// <summary>
+        /// InitializeComponent
+        /// </summary>
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        public void InitializeComponent() {
+            if (_contentLoaded) {
+                return;
+            }
+            _contentLoaded = true;
+            System.Uri resourceLocater = new System.Uri("/WpfClient;component/registerwindow.xaml", System.UriKind.Relative);
+            
+            #line 1 "..\..\RegisterWindow.xaml"
+            System.Windows.Application.LoadComponent(this, resourceLocater);
+            
+            #line default
+            #line hidden
+        }
+        
+        [System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [System.CodeDom.Compiler.GeneratedCodeAttribute("PresentationBuildTasks", "4.0.0.0")]
+        [System.ComponentModel.EditorBrowsableAttribute(System.ComponentModel.EditorBrowsableState.Never)]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Design", "CA1033:InterfaceMethodsShouldBeCallableByChildTypes")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Maintainability", "CA1502:AvoidExcessiveComplexity")]
+        [System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1800:DoNotCastUnnecessarily")]
+        void System.Windows.Markup.IComponentConnector.Connect(int connectionId, object target) {
+            switch (connectionId)
+            {
+            case 1:
+            this.TxtRegLogin = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 2:
+            this.TxtRegPass = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 3:
+            this.TxtRegPath = ((System.Windows.Controls.TextBox)(target));
+            return;
+            case 4:
+            
+            #line 13 "..\..\RegisterWindow.xaml"
+            ((System.Windows.Controls.Button)(target)).Click += new System.Windows.RoutedEventHandler(this.BtnReg_Click);
+            
+            #line default
+            #line hidden
+            return;
+            }
+            this._contentLoaded = true;
+        }
+    }
+}
+
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\Properties\AssemblyInfo.cs --- 
+﻿using System.Reflection;
+using System.Resources;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
+using System.Windows;
+
+// Общие сведения об этой сборке предоставляются следующим набором
+// набор атрибутов. Измените значения этих атрибутов, чтобы изменить сведения,
+// связанные со сборкой.
+[assembly: AssemblyTitle("WpfClient")]
+[assembly: AssemblyDescription("")]
+[assembly: AssemblyConfiguration("")]
+[assembly: AssemblyCompany("")]
+[assembly: AssemblyProduct("WpfClient")]
+[assembly: AssemblyCopyright("Copyright ©  2025")]
+[assembly: AssemblyTrademark("")]
+[assembly: AssemblyCulture("")]
+
+// Установка значения False для параметра ComVisible делает типы в этой сборке невидимыми
+// для компонентов COM. Если необходимо обратиться к типу в этой сборке через
+// из модели COM, установите атрибут ComVisible для этого типа в значение true.
+[assembly: ComVisible(false)]
+
+//Чтобы начать создание локализуемых приложений, задайте
+//<UICulture>CultureYouAreCodingWith</UICulture> в файле .csproj
+//в <PropertyGroup>. Например, при использовании английского (США)
+//в своих исходных файлах установите <UICulture> в en-US.  Затем отмените преобразование в комментарий
+//атрибута NeutralResourceLanguage ниже.  Обновите "en-US" в
+//строка внизу для обеспечения соответствия настройки UICulture в файле проекта.
+
+//[assembly: NeutralResourcesLanguage("en-US", UltimateResourceFallbackLocation.Satellite)]
+
+
+[assembly: ThemeInfo(
+    ResourceDictionaryLocation.None, //где расположены словари ресурсов по конкретным тематикам
+                                     //(используется, если ресурс не найден на странице,
+                                     // или в словарях ресурсов приложения)
+    ResourceDictionaryLocation.SourceAssembly //где расположен словарь универсальных ресурсов
+                                              //(используется, если ресурс не найден на странице,
+                                              // в приложении или в каких-либо словарях ресурсов для конкретной темы)
+)]
+
+
+// Сведения о версии для сборки включают четыре следующих значения:
+//
+//      Основной номер версии
+//      Дополнительный номер версии
+//      Номер сборки
+//      Номер редакции
+//
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\Properties\Resources.Designer.cs --- 
+﻿//------------------------------------------------------------------------------
+// <auto-generated>
+//     Этот код был создан программным средством.
+//     Версия среды выполнения: 4.0.30319.42000
+//
+//     Изменения в этом файле могут привести к неправильному поведению и будут утрачены, если
+//     код создан повторно.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+namespace WpfClient.Properties
+{
+
+
+    /// <summary>
+    ///   Класс ресурсов со строгим типом для поиска локализованных строк и пр.
+    /// </summary>
+    // Этот класс был автоматически создан при помощи StronglyTypedResourceBuilder
+    // класс с помощью таких средств, как ResGen или Visual Studio.
+    // Для добавления или удаления члена измените файл .ResX, а затем перезапустите ResGen
+    // с параметром /str или заново постройте свой VS-проект.
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("System.Resources.Tools.StronglyTypedResourceBuilder", "4.0.0.0")]
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+    [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
+    internal class Resources
+    {
+
+        private static global::System.Resources.ResourceManager resourceMan;
+
+        private static global::System.Globalization.CultureInfo resourceCulture;
+
+        [global::System.Diagnostics.CodeAnalysis.SuppressMessageAttribute("Microsoft.Performance", "CA1811:AvoidUncalledPrivateCode")]
+        internal Resources()
+        {
+        }
+
+        /// <summary>
+        ///   Возврат кэшированного экземпляра ResourceManager, используемого этим классом.
+        /// </summary>
+        [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
+        internal static global::System.Resources.ResourceManager ResourceManager
+        {
+            get
+            {
+                if ((resourceMan == null))
+                {
+                    global::System.Resources.ResourceManager temp = new global::System.Resources.ResourceManager("WpfClient.Properties.Resources", typeof(Resources).Assembly);
+                    resourceMan = temp;
+                }
+                return resourceMan;
+            }
+        }
+
+        /// <summary>
+        ///   Переопределяет свойство CurrentUICulture текущего потока для всех
+        ///   подстановки ресурсов с помощью этого класса ресурсов со строгим типом.
+        /// </summary>
+        [global::System.ComponentModel.EditorBrowsableAttribute(global::System.ComponentModel.EditorBrowsableState.Advanced)]
+        internal static global::System.Globalization.CultureInfo Culture
+        {
+            get
+            {
+                return resourceCulture;
+            }
+            set
+            {
+                resourceCulture = value;
+            }
+        }
+    }
+}
+.
+--- FILE: C:\Users\tanki\source\repos\pr444\WpfClient\Properties\Settings.Designer.cs --- 
+﻿//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+namespace WpfClient.Properties
+{
+
+
+    [global::System.Runtime.CompilerServices.CompilerGeneratedAttribute()]
+    [global::System.CodeDom.Compiler.GeneratedCodeAttribute("Microsoft.VisualStudio.Editors.SettingsDesigner.SettingsSingleFileGenerator", "11.0.0.0")]
+    internal sealed partial class Settings : global::System.Configuration.ApplicationSettingsBase
+    {
+
+        private static Settings defaultInstance = ((Settings)(global::System.Configuration.ApplicationSettingsBase.Synchronized(new Settings())));
+
+        public static Settings Default
+        {
+            get
+            {
+                return defaultInstance;
+            }
+        }
+    }
+}
+.

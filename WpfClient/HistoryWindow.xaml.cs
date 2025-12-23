@@ -10,5 +10,6 @@ namespace WpfClient
             InitializeComponent();
             ListHistory.ItemsSource = history;
         }
+
     }
 }

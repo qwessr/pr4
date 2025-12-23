@@ -1,317 +1,200 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Linq;
 using Common;
-using Microsoft.Data.SqlClient;
 using Newtonsoft.Json;
+using MySqlConnector;
 
 namespace Server
 {
     class Program
     {
-        private static IPAddress ipAddress;
-        private static int port;
-        // Строка подключения для SSMS
-        private static string connectionString = @"Server=localhost;Database=FTPStorage;Trusted_Connection=True;";
-        
-        // Кэш текущих путей пользователей: <UserId, CurrentPath>
+        private static string connStr = "Server=127.0.0.1;Database=FTPStorage;User=root;Password=;SslMode=None;Charset=utf8;";
         private static Dictionary<int, string> userPaths = new Dictionary<int, string>();
 
         static void Main(string[] args)
         {
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
             Console.OutputEncoding = Encoding.UTF8;
-            Console.Title = "FTP Server (SQL Server)";
 
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("╔════════════════════════════════════╗");
-            Console.WriteLine("║      FTP SERVER (SSMS)             ║");
-            Console.WriteLine("╚════════════════════════════════════╝\n");
-
-            // Настройка сети
-            Console.Write("IP адрес (Enter = 127.0.0.1): ");
-            string ip = Console.ReadLine();
-            ipAddress = string.IsNullOrWhiteSpace(ip) ? IPAddress.Parse("127.0.0.1") : IPAddress.Parse(ip);
-
-            Console.Write("Порт (Enter = 8888): ");
-            string portStr = Console.ReadLine();
-            port = string.IsNullOrWhiteSpace(portStr) ? 8888 : int.Parse(portStr);
-
-            StartServer();
-        }
-
-        static void StartServer()
-        {
-            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            IPEndPoint endPoint = new IPEndPoint(ipAddress, port);
-
-            serverSocket.Bind(endPoint);
-            serverSocket.Listen(10);
-
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"\n✓ Сервер запущен: {ipAddress}:{port}\n");
-            Console.ForegroundColor = ConsoleColor.White;
+            TcpListener listener = new TcpListener(IPAddress.Any, 8888);
+            listener.Start();
+            Console.WriteLine(">>> FTP Сервер (Финальная версия) запущен...");
 
             while (true)
             {
                 try
                 {
-                    Socket clientSocket = serverSocket.Accept();
-                    string clientIP = ((IPEndPoint)clientSocket.RemoteEndPoint).Address.ToString();
+                    using Socket client = listener.AcceptSocket();
+                    byte[] buffer = new byte[10485760]; // 10MB
+                    int rec = client.Receive(buffer);
+                    if (rec == 0) continue;
 
-                    byte[] buffer = new byte[10485760]; // 10 MB буфер
-                    int received = clientSocket.Receive(buffer);
-                    string data = Encoding.UTF8.GetString(buffer, 0, received);
+                    string json = Encoding.UTF8.GetString(buffer, 0, rec);
+                    var request = JsonConvert.DeserializeObject<ViewModelSend>(json);
+                    if (request == null) continue;
 
-                    ViewModelSend request = JsonConvert.DeserializeObject<ViewModelSend>(data);
-                    
-                    // Замер времени выполнения
-                    Stopwatch stopwatch = Stopwatch.StartNew();
-                    ViewModelMessage response = ProcessRequest(request, clientIP);
-                    stopwatch.Stop();
+                    if (request.Id != -1) SaveHistory(request.Id, request.Message);
 
-                    // Логирование в БД (кроме команд connect и register, если нужно)
-                    if (request.Id != -1) 
-                    {
-                        LogCommand(request.Id, request.Message, clientIP, stopwatch.ElapsedMilliseconds, 
-                            response.TypeMessage == "message" && response.Message.Contains("Ошибка") ? "error" : "success", 
-                            response.Message);
-                    }
+                    Console.WriteLine($"[Команда]: {request.Message} (User ID: {request.Id})");
 
-                    byte[] responseBytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(response));
-                    clientSocket.Send(responseBytes);
-                    clientSocket.Shutdown(SocketShutdown.Both);
-                    clientSocket.Close();
+                    ViewModelMessage response = ProcessRequest(request);
+
+                    byte[] respBytes = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(response));
+                    client.Send(respBytes);
                 }
                 catch (Exception ex)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine($"Ошибка: {ex.Message}");
+                    Console.WriteLine($"[Ошибка]: {ex.Message}");
                 }
             }
         }
 
-        static ViewModelMessage ProcessRequest(ViewModelSend request, string clientIP)
+        static ViewModelMessage ProcessRequest(ViewModelSend req)
         {
-            string[] parts = request.Message.Split(' ');
-            string command = parts[0].ToLower();
+            if (string.IsNullOrWhiteSpace(req.Message)) return new ViewModelMessage("message", "Пустой запрос");
 
-            Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] IP: {clientIP} | Cmd: {command}");
-
-            switch (command)
-            {
-                case "register": return HandleRegister(parts);
-                case "connect": return HandleConnect(parts);
-                case "cd": return HandleCD(request);
-                case "get": return HandleGet(request);
-                case "history": return HandleHistory(request);
-                default: return HandleUpload(request); // Если это JSON файла
-            }
-        }
-
-        // --- ОБРАБОТЧИКИ КОМАНД ---
-
-        static ViewModelMessage HandleRegister(string[] parts)
-        {
-            if (parts.Length < 4) return new ViewModelMessage("message", "Формат: register логин пароль путь");
-
-            string login = parts[1];
-            string password = parts[2];
-            string path = string.Join(" ", parts.Skip(3));
+            string[] parts = req.Message.Split(' ');
+            string cmd = parts[0].ToLower();
 
             try
             {
-                using (SqlConnection conn = new SqlConnection(connectionString))
+                switch (cmd)
                 {
-                    conn.Open();
-                    // Проверка на существование
-                    SqlCommand checkCmd = new SqlCommand("SELECT COUNT(*) FROM Users WHERE login = @login", conn);
-                    checkCmd.Parameters.AddWithValue("@login", login);
-                    if ((int)checkCmd.ExecuteScalar() > 0)
-                        return new ViewModelMessage("message", "Логин занят");
-
-                    // Регистрация
-                    SqlCommand cmd = new SqlCommand("INSERT INTO Users (login, password, src) VALUES (@login, @password, @src)", conn);
-                    cmd.Parameters.AddWithValue("@login", login);
-                    cmd.Parameters.AddWithValue("@password", password);
-                    cmd.Parameters.AddWithValue("@src", path);
-                    cmd.ExecuteNonQuery();
-
-                    // Создаем папку физически
-                    if (!Directory.Exists(path)) Directory.CreateDirectory(path);
-
-                    return new ViewModelMessage("message", "Регистрация успешна!");
+                    case "history": return HandleHistory(req);
+                    case "register": return HandleRegister(parts);
+                    case "connect": return HandleConnect(parts);
+                    case "cd": return HandleCD(req);
+                    case "get": return HandleGet(req, parts);
+                    default: return HandleFileUpload(req);    
                 }
             }
-            catch (Exception ex) { return new ViewModelMessage("message", $"Ошибка БД: {ex.Message}"); }
-        }
-
-        static ViewModelMessage HandleConnect(string[] parts)
-        {
-            if (parts.Length < 3) return new ViewModelMessage("message", "Формат: connect логин пароль");
-
-            try
+            catch (Exception ex)
             {
-                using (SqlConnection conn = new SqlConnection(connectionString))
-                {
-                    conn.Open();
-                    SqlCommand cmd = new SqlCommand("SELECT id, src FROM Users WHERE login = @l AND password = @p", conn);
-                    cmd.Parameters.AddWithValue("@l", parts[1]);
-                    cmd.Parameters.AddWithValue("@p", parts[2]);
-
-                    using (SqlDataReader reader = cmd.ExecuteReader())
-                    {
-                        if (reader.Read())
-                        {
-                            int id = reader.GetInt32(0);
-                            string src = reader.GetString(1);
-                            
-                            // Инициализируем текущий путь пользователя
-                            if (!userPaths.ContainsKey(id)) userPaths[id] = src;
-
-                            return new ViewModelMessage("authorization", id.ToString());
-                        }
-                    }
-                }
-                return new ViewModelMessage("message", "Неверный логин или пароль");
+                return new ViewModelMessage("message", "Ошибка сервера: " + ex.Message);
             }
-            catch (Exception ex) { return new ViewModelMessage("message", $"Ошибка: {ex.Message}"); }
         }
 
-        static ViewModelMessage HandleCD(ViewModelSend request)
+        static ViewModelMessage HandleHistory(ViewModelSend req)
         {
-            if (request.Id == -1) return new ViewModelMessage("message", "Нет авторизации");
+            List<string> history = new List<string>();
+            using var conn = new MySqlConnection(connStr);
+            conn.Open();
+            var cmd = new MySqlCommand("SELECT command FROM History WHERE user_id = @id ORDER BY id DESC LIMIT 20", conn);
+            cmd.Parameters.AddWithValue("@id", req.Id);
 
-            try
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
             {
-                // Если путь еще не в кэше (сервер перезагружался), восстановим из БД
-                if (!userPaths.ContainsKey(request.Id)) RestoreUserPath(request.Id);
-
-                string currentPath = userPaths[request.Id];
-                string[] parts = request.Message.Split(new[] { ' ' }, 2);
-
-                if (parts.Length > 1)
-                {
-                    string folder = parts[1].Trim();
-                    if (folder == "..")
-                    {
-                        DirectoryInfo parent = Directory.GetParent(currentPath);
-                        if (parent != null) currentPath = parent.FullName;
-                    }
-                    else
-                    {
-                        string newPath = Path.Combine(currentPath, folder);
-                        if (Directory.Exists(newPath)) currentPath = newPath;
-                        else return new ViewModelMessage("message", "Папка не найдена");
-                    }
-                    userPaths[request.Id] = currentPath;
-                }
-
-                // Собираем список файлов
-                var items = new List<string>();
-                if (Directory.GetParent(currentPath) != null) items.Add("../");
-                
-                foreach (var d in Directory.GetDirectories(currentPath)) items.Add(Path.GetFileName(d) + "/");
-                foreach (var f in Directory.GetFiles(currentPath)) items.Add(Path.GetFileName(f));
-
-                // Формируем JSON объект как в примере
-                var resultObj = new { items = items, currentPath = currentPath };
-                return new ViewModelMessage("cd", JsonConvert.SerializeObject(resultObj));
+                history.Add(reader.GetString(0));
             }
-            catch (Exception ex) { return new ViewModelMessage("message", $"Ошибка: {ex.Message}"); }
+
+            return new ViewModelMessage("history", JsonConvert.SerializeObject(history));
         }
 
-        static ViewModelMessage HandleGet(ViewModelSend request)
+        static ViewModelMessage HandleRegister(string[] p)
+        {
+            if (p.Length < 4) return new ViewModelMessage("message", "Нужно: register логин пароль путь");
+
+            string rawPath = string.Join(" ", p.Skip(3)).Replace("\"", "").Trim();
+
+            using var conn = new MySqlConnection(connStr);
+            conn.Open();
+            var cmd = new MySqlCommand("INSERT INTO Users (login, password, src) VALUES (@l, @p, @s)", conn);
+            cmd.Parameters.AddWithValue("@l", p[1]);
+            cmd.Parameters.AddWithValue("@p", p[2]);
+            cmd.Parameters.AddWithValue("@s", rawPath);
+            cmd.ExecuteNonQuery();
+
+            if (!Directory.Exists(rawPath)) Directory.CreateDirectory(rawPath);
+
+            return new ViewModelMessage("message", "Регистрация успешна. Директория готова.");
+        }
+
+        static ViewModelMessage HandleConnect(string[] p)
+        {
+            if (p.Length < 3) return new ViewModelMessage("message", "Нужно: connect логин пароль");
+            using var conn = new MySqlConnection(connStr);
+            conn.Open();
+            var cmd = new MySqlCommand("SELECT id, src FROM Users WHERE login=@l AND password=@p", conn);
+            cmd.Parameters.AddWithValue("@l", p[1]);
+            cmd.Parameters.AddWithValue("@p", p[2]);
+
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                int id = r.GetInt32(0);
+                userPaths[id] = r.GetString(1);
+                return new ViewModelMessage("authorization", id.ToString());
+            }
+            return new ViewModelMessage("message", "Ошибка авторизации.");
+        }
+
+
+        static void SaveHistory(int userId, string command)
         {
             try
             {
-                string fileName = request.Message.Substring(4); // "get filename"
-                string fullPath = Path.Combine(userPaths[request.Id], fileName);
-
-                if (File.Exists(fullPath))
-                {
-                    byte[] data = File.ReadAllBytes(fullPath);
-                    return new ViewModelMessage("file", JsonConvert.SerializeObject(data));
-                }
-                return new ViewModelMessage("message", "Файл не найден");
-            }
-            catch (Exception ex) { return new ViewModelMessage("message", ex.Message); }
-        }
-
-        static ViewModelMessage HandleUpload(ViewModelSend request)
-        {
-            try
-            {
-                FileInfoFTP file = JsonConvert.DeserializeObject<FileInfoFTP>(request.Message);
-                string fullPath = Path.Combine(userPaths[request.Id], file.Name);
-                File.WriteAllBytes(fullPath, file.Data);
-                return new ViewModelMessage("message", "Файл загружен");
-            }
-            catch { return new ViewModelMessage("message", "Ошибка загрузки"); }
-        }
-
-        static ViewModelMessage HandleHistory(ViewModelSend request)
-        {
-            try
-            {
-                using (SqlConnection conn = new SqlConnection(connectionString))
-                {
-                    conn.Open();
-                    // Берем последние 20 команд
-                    string query = "SELECT TOP 20 command, executed_at, status FROM UserCommands WHERE user_id = @uid ORDER BY executed_at DESC";
-                    SqlCommand cmd = new SqlCommand(query, conn);
-                    cmd.Parameters.AddWithValue("@uid", request.Id);
-
-                    List<string> history = new List<string>();
-                    using (SqlDataReader r = cmd.ExecuteReader())
-                    {
-                        while (r.Read())
-                        {
-                            history.Add($"[{r.GetDateTime(1):HH:mm:ss}] {r.GetString(0)} ({r.GetString(2)})");
-                        }
-                    }
-                    return new ViewModelMessage("history", JsonConvert.SerializeObject(history));
-                }
-            }
-            catch (Exception ex) { return new ViewModelMessage("message", ex.Message); }
-        }
-
-        static void LogCommand(int userId, string cmdText, string ip, long ms, string status, string result)
-        {
-            try
-            {
-                using (SqlConnection conn = new SqlConnection(connectionString))
-                {
-                    conn.Open();
-                    string query = @"INSERT INTO UserCommands (user_id, command, ip_address, execution_time_ms, status, result_message) 
-                                     VALUES (@u, @c, @ip, @ms, @s, @r)";
-                    SqlCommand cmd = new SqlCommand(query, conn);
-                    cmd.Parameters.AddWithValue("@u", userId);
-                    cmd.Parameters.AddWithValue("@c", cmdText.Length > 50 ? cmdText.Substring(0, 50) + "..." : cmdText);
-                    cmd.Parameters.AddWithValue("@ip", ip);
-                    cmd.Parameters.AddWithValue("@ms", ms);
-                    cmd.Parameters.AddWithValue("@s", status);
-                    cmd.Parameters.AddWithValue("@r", result.Length > 100 ? result.Substring(0, 100) : result);
-                    cmd.ExecuteNonQuery();
-                }
-            }
-            catch { /* Игнорируем ошибки логгера */ }
-        }
-
-        static void RestoreUserPath(int id)
-        {
-            using (SqlConnection conn = new SqlConnection(connectionString))
-            {
+                using var conn = new MySqlConnection(connStr);
                 conn.Open();
-                SqlCommand cmd = new SqlCommand("SELECT src FROM Users WHERE id = @id", conn);
-                cmd.Parameters.AddWithValue("@id", id);
-                string src = (string)cmd.ExecuteScalar();
-                if (src != null) userPaths[id] = src;
+                var cmd = new MySqlCommand("INSERT INTO History (user_id, command) VALUES (@u, @c)", conn);
+                cmd.Parameters.AddWithValue("@u", userId);
+                cmd.Parameters.AddWithValue("@c", command);
+                cmd.ExecuteNonQuery();
             }
+            catch { /* Игнорируем ошибки записи истории */ }
+        }
+
+        static ViewModelMessage HandleCD(ViewModelSend req)
+        {
+            if (!userPaths.ContainsKey(req.Id)) return new ViewModelMessage("message", "Сначала connect");
+            string path = userPaths[req.Id];
+
+            if (!Directory.Exists(path)) return new ViewModelMessage("message", "Путь не найден");
+
+            var entries = Directory.GetFileSystemEntries(path)
+                                   .Select(x => Directory.Exists(x) ? Path.GetFileName(x) + "/" : Path.GetFileName(x))
+                                   .ToList();
+
+            var result = new { currentPath = path, items = entries };
+            return new ViewModelMessage("cd", JsonConvert.SerializeObject(result));
+        }
+
+
+        static ViewModelMessage HandleGet(ViewModelSend req, string[] p)
+        {
+            if (p.Length < 2) return new ViewModelMessage("message", "Укажите имя файла");
+            if (!userPaths.ContainsKey(req.Id)) return new ViewModelMessage("message", "Нужна авторизация");
+
+            string fullPath = Path.Combine(userPaths[req.Id], p[1]);
+            if (File.Exists(fullPath))
+            {
+                byte[] data = File.ReadAllBytes(fullPath);
+                FileInfoFTP file = new FileInfoFTP(data, p[1]);
+
+                return new ViewModelMessage("file", JsonConvert.SerializeObject(file));
+            }
+            return new ViewModelMessage("message", "Файл не найден.");
+        }
+
+        static ViewModelMessage HandleFileUpload(ViewModelSend req)
+        {
+            try
+            {
+                var file = JsonConvert.DeserializeObject<FileInfoFTP>(req.Message);
+                if (file != null && userPaths.ContainsKey(req.Id))
+                {
+                    string savePath = Path.Combine(userPaths[req.Id], file.Name);
+                    File.WriteAllBytes(savePath, file.Data);
+                    return new ViewModelMessage("message", $"Файл '{file.Name}' загружен на сервер.");
+                }
+            }
+            catch { }
+            return new ViewModelMessage("message", "Неизвестная команда.");
         }
     }
 }

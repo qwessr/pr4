@@ -17,7 +17,7 @@ namespace WpfClient
             try
             {
                 // Отправка запроса регистрации без авторизации (id = -1)
-                var req = new ViewModelSend($"register {TxtRegLogin.Text} {TxtRegPass.Text} {TxtRegPath.Text}", -1);
+                var req = new ViewModelSend($"register {TxtRegLogin.Text} {TxtRegPass.Password} {TxtRegPath.Text}", -1);
 
                 using (Socket s = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp))
                 {

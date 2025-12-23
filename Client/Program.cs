@@ -4,7 +4,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using Common;
-using Newtonsoft.Json; 
+using Newtonsoft.Json;
 
 namespace Client
 {
@@ -47,80 +47,71 @@ namespace Client
 
                 if (socket.Connected)
                 {
-                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.ForegroundColor = ConsoleColor.White;
                     string message = Console.ReadLine();
 
                     if (CheckCommand(message))
                     {
                         ViewModelSend viewModelSend = new ViewModelSend(message, Id);
 
-                        // Логика отправки файла (set filename)
                         string[] parts = message.Split(' ');
-                        if (parts[0] == "set" && parts.Length > 1)
+                        if (parts[0].ToLower() == "set" && parts.Length > 1)
                         {
-                            string nameFile = string.Join(" ", parts, 1, parts.Length - 1);
+                            string nameFile = string.Join(" ", parts.Skip(1)).Replace("\"", "");
                             if (File.Exists(nameFile))
                             {
-                                FileInfo fileInfo = new FileInfo(nameFile);
-                                FileInfoFTP fileInfoFTP = new FileInfoFTP(File.ReadAllBytes(nameFile), fileInfo.Name);
+                                FileInfo info = new FileInfo(nameFile);
+                                byte[] fileData = File.ReadAllBytes(nameFile);
+                                FileInfoFTP fileInfoFTP = new FileInfoFTP(fileData, info.Name);
                                 viewModelSend = new ViewModelSend(JsonConvert.SerializeObject(fileInfoFTP), Id);
                             }
                             else
                             {
-                                Console.WriteLine("Файл не найден");
+                                Console.WriteLine("Файл для отправки не найден локально.");
                                 return;
                             }
                         }
 
+                        // Отправка запроса
                         byte[] messageByte = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(viewModelSend));
                         socket.Send(messageByte);
 
+                        // Получение ответа
                         byte[] bytes = new byte[10485760]; // 10 MB
                         int byteRec = socket.Receive(bytes);
                         string messageServer = Encoding.UTF8.GetString(bytes, 0, byteRec);
 
                         ViewModelMessage response = JsonConvert.DeserializeObject<ViewModelMessage>(messageServer);
 
+
                         if (response.TypeMessage == "authorization" || response.TypeMessage == "autorization")
                         {
                             Id = int.Parse(response.Message);
-                            Console.WriteLine($"Авторизован. ID: {Id}");
+                            Console.ForegroundColor = ConsoleColor.Cyan;
+                            Console.WriteLine($"Успешный вход! Ваш ID: {Id}");
                         }
                         else if (response.TypeMessage == "message")
                         {
                             Console.WriteLine(response.Message);
                         }
-                        else if (response.TypeMessage == "cd" || response.TypeMessage == "list")
-                        {
-                            // Если сервер присылает JSON объект 
-                            try
-                            {
-                                // Пытаемся распарсить как старый список
-                                var list = JsonConvert.DeserializeObject<System.Collections.Generic.List<string>>(response.Message);
-                                foreach (var item in list) Console.WriteLine(item);
-                            }
-                            catch
-                            {
-                                // Или просто выводим данные
-                                Console.WriteLine(response.Message);
-                            }
-                        }
                         else if (response.TypeMessage == "file")
                         {
-                            string getFile = "downloaded_file";
-                            if (parts[0] == "get" && parts.Length > 1) getFile = parts[1];
+                            var fileReceived = JsonConvert.DeserializeObject<FileInfoFTP>(response.Message);
 
-                            byte[] byteFile = JsonConvert.DeserializeObject<byte[]>(response.Message);
-                            File.WriteAllBytes(getFile, byteFile);
-                            Console.WriteLine("Файл скачан.");
+                            File.WriteAllBytes(fileReceived.Name, fileReceived.Data);
+
+                            Console.ForegroundColor = ConsoleColor.Yellow;
+                            Console.WriteLine($"[СИСТЕМА]: Файл '{fileReceived.Name}' успешно получен и сохранен.");
                         }
                     }
                 }
             }
             catch (Exception exp)
             {
+                Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine("Ошибка: " + exp.Message);
             }
+
         }
     }
 }
